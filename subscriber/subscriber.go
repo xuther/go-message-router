@@ -3,8 +3,10 @@ package subscriber
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"reflect"
 
 	"github.com/xuther/go-message-router/common"
 )
@@ -19,8 +21,10 @@ type susbcriber struct {
 	aggregateQueueSize  int
 	individualQueueSize int
 	subscriptions       []*readSubscription
+	susbcriptionSelect  []reflect.SelectCase
 	queuedMessages      chan common.Message
-	aggregatorStarted   bool
+	subscribeChan       chan *readSubscription
+	unsubscrbeChan      chan *readSubscription
 }
 
 type readSubscription struct {
@@ -56,9 +60,7 @@ func (s *subscriber) Subscribe(address string, filters []string) error {
 		return err
 	}
 
-	if !s.aggregatorStarted {
-
-	}
+	s.startAggregationManager()
 
 	subscription := readSubscription{
 		address:    address,
@@ -66,16 +68,42 @@ func (s *subscriber) Subscribe(address string, filters []string) error {
 		connection: conn,
 		ReadQueue:  make(chan common.Message, s.individualQueueSize),
 	}
-	subscription.StartListener()
 
-	s.subscriptions = append(s.subscriptions, subscription)
+	s.subscribeChan <- subscription
 }
 
 func (s *subscriber) startAggregator() {
 	go func() {
 		for {
+			chosen, value, ok := reflect.Select(s.subscriptionSelect)
+			if !ok {
+				s.subscriptionSelect[chosen] = s.subscriptionSelect[len(s.subscriptionSelect)-1]
+				s.subscriptionSelect[len(s.subscriptionSelect)-1] = nil
+				s.subscriptionSelect = s.subscriptionSelect[:len(s.subscriptionSelect)-1]
+			}
+
+			//New Subscription to listen to
+			if chosen == 1 {
+
+			}
 
 		}
+	}()
+}
+
+func (s *subscriber) startAggregationManager() {
+	go func() {
+		firstSubscription := <-s.subscribeChan
+		subscription.StartListener()
+		s.subscriptions = append(s.subscriptions, subscription)
+		s.startAggregator()
+
+		//Add the first two to our select statments, our subscribe and unsubscribe channel.
+		s.subscriptionSelect = append(s.SubscriptionSelect,
+			reflect.SelectCase{Dir: reflect.SelectRecv, Chan: subscribeChan},
+			reflect.SelectCase{Dir: reflect.SelectRecv, Chan: unsubscribeChan})
+		startAggregator()
+
 	}()
 }
 
@@ -87,6 +115,13 @@ func (rs *readSubscription) StartListener() {
 
 			num, err := rs.connection.Read(temp)
 			if err != nil {
+				if err == io.EOF {
+					log.Printf("The connection for %s was closed", rs.connection.RemoteAddr())
+					rs.sub.UnsubscribeChan <- rs
+					return
+
+				}
+
 				log.Printf("There was a problem reading from the connection to %s", rs.address)
 				continue
 			}
