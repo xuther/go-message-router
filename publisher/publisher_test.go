@@ -140,6 +140,6 @@ func BenchmarkPublisher(b *testing.B) {
 	d := endTime.Sub(starttime)
 	perSec := 100000 / float64(d/time.Second)
 
-	log.Printf("time Taken: %v", perSec)
+	log.Printf("Messages per second: %v", perSec)
 
 }
