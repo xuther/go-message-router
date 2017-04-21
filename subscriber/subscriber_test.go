@@ -1,6 +1,7 @@
 package subscriber
 
 import (
+	"fmt"
 	"log"
 	"testing"
 	"time"
@@ -27,10 +28,17 @@ func TestSubscribe(t *testing.T) {
 	time.Sleep(1 * time.Second)
 	log.Printf("Writing")
 
-	publisher.Write(common.Message{header, []byte("test")})
+	for i := 0; i < 100; i++ {
+		message := fmt.Sprintf("test %v\n", i)
+
+		publisher.Write(common.Message{header, []byte(message)})
+	}
+
 	log.Printf("Reading")
 
-	test := sub.Read()
+	for i := 0; i < 100; i++ {
+		test := sub.Read()
+		log.Printf("%v", test)
 
-	log.Printf("%v", test)
+	}
 }
