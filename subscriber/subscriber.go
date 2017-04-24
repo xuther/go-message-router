@@ -1,11 +1,13 @@
 package subscriber
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"regexp"
 
 	"github.com/xuther/go-message-router/common"
 )
@@ -25,6 +27,7 @@ type subscriber struct {
 }
 
 type readSubscription struct {
+	FilterList []*regexp.Regexp
 	Address    string
 	Sub        *subscriber
 	Connection *net.TCPConn
@@ -53,6 +56,16 @@ func (s *subscriber) Read() common.Message {
 
 func (s *subscriber) Subscribe(address string, filters []string) error {
 
+	compiledFilters := []*regexp.Regexp{}
+	for _, filter := range filters {
+		val, err := regexp.Compile(filter)
+		if err != nil {
+			err = errors.New(fmt.Sprintf("Error compiling filter %s: %s", filter, err.Error()))
+			return err
+		}
+		compiledFilters = append(compiledFilters, val)
+	}
+
 	addr, err := net.ResolveTCPAddr("tcp", address)
 	if err != nil {
 		err = errors.New(fmt.Sprintf("Error resolving the TCP addr %s: %s", address, err.Error()))
@@ -72,6 +85,7 @@ func (s *subscriber) Subscribe(address string, filters []string) error {
 		Address:    address,
 		Sub:        s,
 		Connection: conn,
+		FilterList: compiledFilters,
 	}
 
 	log.Printf("Subscription created, adding to manager")
@@ -106,11 +120,9 @@ func (rs *readSubscription) StartListener() {
 	go func() {
 		log.Printf("Starting listener")
 		for {
-			buf := []byte{}
-			temp := make([]byte, 8192)
+			headerAndLen := make([]byte, 28)
 
-			num, err := rs.Connection.Read(temp)
-			log.Printf("Message Recieved: %s", temp)
+			num, err := rs.Connection.Read(headerAndLen)
 			if err != nil {
 				if err == io.EOF {
 					log.Printf("The connection for %s was closed", rs.Address)
@@ -121,20 +133,33 @@ func (rs *readSubscription) StartListener() {
 				log.Printf("There was a problem reading from the connection to %s", rs.Address)
 				continue
 			}
-			buf = append(buf, temp[:num]...)
 
-			//finish reading the message
-			for num%8192 == 0 && num != 0 {
-				num, err := rs.Connection.Read(temp)
-				if err != nil {
-					log.Printf("There was a problem reading from the connection to %s", rs.Address)
-					continue
-				}
-				buf = append(buf, temp[:num]...)
+			//Get the length out of the message
+			messageLen := binary.LittleEndian.Uint32(headerAndLen[24:])
+
+			//pull out the rest of the message.
+			message := make([]byte, messageLen)
+			num, err = rs.Connection.Read(message)
+			if err != nil {
+				log.Printf("There was a problem reading from the connection to %s", rs.Address)
+				continue
 			}
-			header := [24]byte{}
-			copy(header[:], buf[:24])
-			rs.Sub.QueuedMessages <- common.Message{MessageHeader: header, MessageBody: buf[24:]}
+			if num != int(messageLen) {
+				log.Printf("Not all of the message was recieved")
+
+			}
+
+			//check the header to see if we care about the message
+			for _, filter := range rs.FilterList {
+
+				//only read in the message if it meets the criteria
+				if filter.Match(headerAndLen[:24]) {
+					header := [24]byte{}
+					copy(header[:], headerAndLen[:24])
+					rs.Sub.QueuedMessages <- common.Message{MessageHeader: header, MessageBody: message}
+					break
+				}
+			}
 		}
 	}()
 }

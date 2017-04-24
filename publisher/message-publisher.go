@@ -1,6 +1,7 @@
 package publisher
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -163,7 +164,16 @@ func (s *subscription) StartWriter() {
 				if debug {
 					log.Printf("Sending Message to %s", s.Connection.RemoteAddr().String())
 				}
-				toWriteBytes := append(toWrite.MessageHeader[:], toWrite.MessageBody...)
+
+				//We need to write out the Length
+				messageLen := make([]byte, 4)
+				binary.LittleEndian.PutUint32(messageLen, uint32(len(toWrite.MessageBody)))
+
+				//Build our packet to send
+				toWriteBytes := append(toWrite.MessageHeader[:], messageLen[:]...)
+				toWriteBytes = append(toWriteBytes, toWrite.MessageBody...)
+
+				//send
 				numWritten, err := s.Connection.Write(toWriteBytes)
 				if err != nil || numWritten != len(toWriteBytes) {
 					if err != nil {
