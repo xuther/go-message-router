@@ -37,8 +37,6 @@ func TestRouter(t *testing.T) {
 		t.Fail()
 	}
 
-	time.Sleep(1 * time.Second) //give the os time to bind teh tcp port
-
 	sub, err := subscriber.NewSubscriber(3000)
 	if err != nil {
 		t.Error(err)
@@ -47,6 +45,8 @@ func TestRouter(t *testing.T) {
 
 	sub.Subscribe("localhost:60005", []string{"a", "b", "c", "d"})
 
+	time.Sleep(1 * time.Second) //give the os time to bind teh tcp port
+
 	headera := [24]byte{}
 	copy(headera[:], "a")
 
@@ -54,10 +54,12 @@ func TestRouter(t *testing.T) {
 	copy(headerb[:], "b")
 
 	headerc := [24]byte{}
-	copy(headerb[:], "c")
+	copy(headerc[:], "c")
 
 	pub.Write(common.Message{headera, []byte("a->b|a->c")})
+
 	pub.Write(common.Message{headerb, []byte("b -> a")})
+
 	pub.Write(common.Message{headerc, []byte("c -> d")})
 
 	a := sub.Read()
