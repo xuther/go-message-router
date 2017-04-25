@@ -174,3 +174,57 @@ func TestSocketSubscription(t *testing.T) {
 	assert.Equal(t, temp2.MessageHeader, headerb)
 	assert.Equal(t, temp2.MessageBody, temp1.MessageBody)
 }
+
+func TestLoad(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+	routingGuide := make(map[string][]string)
+
+	routingGuide["a"] = []string{"b"}
+	routingGuide["c"] = []string{"d", "b"}
+	routingGuide["d"] = []string{"b"}
+
+	pub, err := publisher.NewPublisher("60010", 1000, 10)
+	if err != nil {
+		t.Error(err)
+		t.Fail()
+	}
+	go pub.Listen()
+
+	var wg1 sync.WaitGroup
+	wg1.Add(3)
+
+	r1 := Router{}
+
+	err = r1.Start(routingGuide, wg1, 1000, []string{"localhost:60010"}, 10, time.Second*1, "60011")
+	if err != nil {
+		t.Error(err)
+		t.Fail()
+	}
+
+	sub, err := subscriber.NewSubscriber(3000)
+	if err != nil {
+		t.Error(err)
+		t.Fail()
+	}
+
+	sub.Subscribe("localhost:60011", []string{"a", "b", "c"})
+
+	headera := [24]byte{}
+	copy(headera[:], "a")
+
+	go func() {
+		for {
+			sub.Read()
+		}
+	}()
+
+	//End Setup
+	for i := 0; i < 100; i++ {
+		for j := 0; j < 100; j++ {
+			pub.Write(common.Message{MessageHeader: headera, MessageBody: []byte("Let the wookie win")})
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
