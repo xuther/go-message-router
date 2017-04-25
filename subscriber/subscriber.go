@@ -55,7 +55,6 @@ func (s *subscriber) Read() common.Message {
 }
 
 func (s *subscriber) Subscribe(address string, filters []string) error {
-
 	compiledFilters := []*regexp.Regexp{}
 	for _, filter := range filters {
 		val, err := regexp.Compile(filter)
@@ -141,6 +140,11 @@ func (rs *readSubscription) StartListener() {
 			message := make([]byte, messageLen)
 			num, err = rs.Connection.Read(message)
 			if err != nil {
+				if err == io.EOF {
+					log.Printf("The connection for %s was closed", rs.Address)
+					rs.Sub.unsubscribeChan <- rs
+					return
+				}
 				log.Printf("There was a problem reading from the connection to %s", rs.Address)
 				continue
 			}

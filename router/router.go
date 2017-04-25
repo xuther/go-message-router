@@ -6,13 +6,37 @@ import (
 	"log"
 	"regexp"
 	"sync"
+	"time"
 
 	"github.com/xuther/go-message-router/common"
 	"github.com/xuther/go-message-router/publisher"
 	"github.com/xuther/go-message-router/subscriber"
 )
 
-func Publisher(messageChan <-chan common.Message, exit <-chan bool, port string, wg sync.WaitGroup) error {
+type Router struct {
+	addressChan   chan subscriptionReq
+	inChan        chan common.Message
+	outChan       chan common.Message
+	exitChan      chan bool
+	subscriptions []string
+}
+
+type subscriptionReq struct {
+	Address  string
+	Count    int
+	Interval time.Duration
+}
+
+var subscriptionHeader = [24]byte{'X',
+	'S', 'U', 'B', 'S',
+	'C', 'R', 'I', 'P',
+	'T', 'I', 'O', 'N',
+	'R', 'E', 'Q',
+}
+
+var subscriptionHeaderString = "XSUBSCRIPTIONREQ"
+
+func (r *Router) publisher(port string, wg sync.WaitGroup) error {
 
 	log.Printf("Publisher: Starting publisher")
 	pub, err := publisher.NewPublisher(port, 1000, 10)
@@ -27,9 +51,9 @@ func Publisher(messageChan <-chan common.Message, exit <-chan bool, port string,
 	go func() {
 		for {
 			select {
-			case message := <-messageChan:
+			case message := <-r.outChan:
 				pub.Write(message)
-			case <-exit:
+			case <-r.exitChan:
 				wg.Done()
 				return
 			}
@@ -38,8 +62,9 @@ func Publisher(messageChan <-chan common.Message, exit <-chan bool, port string,
 	return nil
 }
 
-func Reciever(messageChan chan<- common.Message, exit <-chan bool, addressChan chan string, messageTypes []string, wg sync.WaitGroup) error {
+func (r *Router) reciever(messageTypes []string, wg sync.WaitGroup) error {
 	log.Printf("Reciever: staring reciever")
+
 	sub, err := subscriber.NewSubscriber(3000)
 	if err != nil {
 		wg.Done()
@@ -47,31 +72,48 @@ func Reciever(messageChan chan<- common.Message, exit <-chan bool, addressChan c
 	}
 
 	go func() {
+		messageTypes = append(messageTypes, subscriptionHeaderString)
 		for {
-			subscriptions := []string{}
 			select {
-			case addr, ok := <-addressChan:
+			case addr, ok := <-r.addressChan:
 				if ok {
 					alreadySubbed := false
-					log.Printf("Reciever: Starting connection with %s", addr)
-					for _, t := range subscriptions {
-						if t == addr {
+					log.Printf("Reciever: Starting connection with %s", addr.Address)
+					for _, t := range r.subscriptions {
+						log.Printf("Checking already existent subscription")
+						if t == addr.Address {
 							alreadySubbed = true
 							break
+						} else {
 						}
 					}
 					if alreadySubbed {
+						log.Printf("Receiver: already subbed to %s", addr.Address)
 						continue
 					}
 
-					err = sub.Subscribe(addr, messageTypes)
+					err = sub.Subscribe(addr.Address, messageTypes)
 					if err != nil {
-						log.Printf("Reciever: ERROR: %s", err.Error())
+						if addr.Count > 0 { //retry
+							log.Printf("Reciever: Subscription failed: %s, will try again %v times", err.Error(), addr.Count)
+							addr.Count--
+							go func() {
+								timer := time.NewTimer(addr.Interval)
+								<-timer.C
+
+								log.Printf("Reciever: Retrying subscription for %s", addr.Address)
+								r.addressChan <- addr
+							}()
+
+						} else {
+							log.Printf("Reciever: ERROR: %s", err.Error())
+						}
 						continue
 					}
 
 					//note that we already have a subscription so we won't run one again
-					subscriptions = append(subscriptions, addr)
+					r.subscriptions = append(r.subscriptions, addr.Address)
+					log.Printf("Receiver: subscription to %s added", addr.Address)
 				} else {
 					log.Printf("Reciever: Error - subscription channel closed")
 					return
@@ -85,25 +127,11 @@ func Reciever(messageChan chan<- common.Message, exit <-chan bool, addressChan c
 	go func() {
 		for {
 
-			//check for new subscription messages
-			tempMessage := sub.Read()
-			if tempMessage.MessageHeader == [24]byte{
-				1, 1, 1, 1,
-				1, 1, 1, 1,
-				1, 1, 1, 1,
-				1, 1, 1, 1,
-				1, 1, 1, 1,
-				1, 1, 1, 1,
-			} {
-				address := fmt.Sprintf("%s", tempMessage.MessageBody)
-				addressChan <- address
-				continue
-			}
-			messageChan <- tempMessage
+			r.inChan <- sub.Read()
 
 			//check for exit command
 			select {
-			case <-exit:
+			case <-r.exitChan:
 				wg.Done()
 				return
 			default:
@@ -116,26 +144,27 @@ func Reciever(messageChan chan<- common.Message, exit <-chan bool, addressChan c
 }
 
 //Start starts the router on teh specified port, returns an address channel that may be used to add more subscriptions
-func Start(routingGuide map[string][]string, wg sync.WaitGroup, channelSize int, addresses []string, publisherPort string) (chan<- string, error) {
+func (r *Router) Start(routingGuide map[string][]string, wg sync.WaitGroup, channelSize int, addresses []string, retrySubscribeAttempts int, retrySubscribeInterval time.Duration, publisherPort string) error {
 	//Build our channel
-	inChan := make(chan common.Message, channelSize)
-	outChan := make(chan common.Message, channelSize)
-	exitChan := make(chan bool, 3)
-	addressChan := make(chan string)
+	r.inChan = make(chan common.Message, channelSize)
+	r.outChan = make(chan common.Message, channelSize)
+	r.exitChan = make(chan bool, 3)
+	r.addressChan = make(chan subscriptionReq, 10)
+	r.subscriptions = []string{}
 
 	toListen := []string{}
 
 	//start our publisher
 	//func Publisher(messageChan <-chan common.Message, exit <-chan bool, port int, wg sync.WaitGroup) error {
-	err := Publisher(outChan, exitChan, publisherPort, wg)
+	err := r.publisher(publisherPort, wg)
 	if err != nil {
-		return addressChan, err
+		return err
 	}
 
 	//start our router
-	err = Router(inChan, outChan, exitChan, wg, routingGuide)
+	err = r.router(wg, routingGuide)
 	if err != nil {
-		return addressChan, err
+		return err
 	}
 
 	//build our list of things to listen to.
@@ -143,21 +172,25 @@ func Start(routingGuide map[string][]string, wg sync.WaitGroup, channelSize int,
 		toListen = append(toListen, k)
 	}
 
-	err = Reciever(inChan, exitChan, addressChan, toListen, wg)
+	err = r.reciever(toListen, wg)
 	if err != nil {
-		return addressChan, err
+		return err
 	}
 
 	//subscribe to all the addresses
 	for _, addr := range addresses {
-		addressChan <- addr
+		r.Subscribe(addr, retrySubscribeAttempts, retrySubscribeInterval)
 	}
-	return addressChan, nil
+	return nil
+}
+
+func (r *Router) Subscribe(address string, retryCount int, interval time.Duration) {
+	r.addressChan <- subscriptionReq{Address: address, Count: retryCount, Interval: interval}
 }
 
 //The router takes messages in, relabels them according to the routing guide, and then outputs them.
 //Note that the routing guide takes a first rule matched approach, so ensure that more specific rules are defined first
-func Router(inChan <-chan common.Message, outChan chan<- common.Message, exit <-chan bool, wg sync.WaitGroup, routingGuide map[string][]string) error {
+func (r *Router) router(wg sync.WaitGroup, routingGuide map[string][]string) error {
 	log.Printf("Router: starting router")
 
 	workingGuide := make(map[*regexp.Regexp][][24]byte)
@@ -195,12 +228,12 @@ func Router(inChan <-chan common.Message, outChan chan<- common.Message, exit <-
 
 		for {
 			select {
-			case curEvent, ok := <-inChan:
+			case curEvent, ok := <-r.inChan:
 				if ok {
 					for k, v := range workingGuide {
 						if k.Match(curEvent.MessageHeader[:]) {
 							for i := range v {
-								outChan <- common.Message{MessageHeader: v[i], MessageBody: curEvent.MessageBody}
+								r.outChan <- common.Message{MessageHeader: v[i], MessageBody: curEvent.MessageBody}
 							}
 							break //break out of our for loop
 						}
@@ -210,6 +243,9 @@ func Router(inChan <-chan common.Message, outChan chan<- common.Message, exit <-
 					wg.Done()
 					return
 				}
+			case <-r.exitChan:
+				wg.Done()
+				return
 			}
 		}
 	}()
