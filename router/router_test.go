@@ -221,7 +221,7 @@ func TestLoad(t *testing.T) {
 	}()
 
 	//End Setup
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 500; i++ {
 		for j := 0; j < 100; j++ {
 			pub.Write(common.Message{MessageHeader: headera, MessageBody: []byte("Let the wookie win")})
 		}
