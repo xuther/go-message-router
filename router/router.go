@@ -34,6 +34,8 @@ var subscriptionHeader = [24]byte{'X',
 	'R', 'E', 'Q',
 }
 
+const debug = true
+
 var subscriptionHeaderString = "XSUBSCRIPTIONREQ"
 
 func (r *Router) publisher(port string, wg sync.WaitGroup) error {
@@ -225,14 +227,20 @@ func (r *Router) router(wg sync.WaitGroup, routingGuide map[string][]string) err
 	}
 
 	go func() {
-
 		for {
 			select {
 			case curEvent, ok := <-r.inChan:
 				if ok {
+					log.Printf("Event Recieved: Routing Event")
+
+					if debug {
+						log.Printf("Routing event %v", curEvent)
+					}
+
 					for k, v := range workingGuide {
 						if k.Match(curEvent.MessageHeader[:]) {
 							for i := range v {
+								log.Printf("Routing from %v to %v", curEvent.MessageHeader[:], v[i])
 								r.outChan <- common.Message{MessageHeader: v[i], MessageBody: curEvent.MessageBody}
 							}
 							break //break out of our for loop

@@ -175,8 +175,8 @@ func TestSocketSubscription(t *testing.T) {
 	assert.Equal(t, temp2.MessageBody, temp1.MessageBody)
 }
 
-func TestLoad(t *testing.T) {
-	if testing.Short() {
+func Load(t *testing.T) {
+	if testing.Short() || !testing.Verbose() {
 		t.SkipNow()
 	}
 	routingGuide := make(map[string][]string)
