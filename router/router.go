@@ -234,13 +234,14 @@ func (r *Router) router(wg sync.WaitGroup, routingGuide map[string][]string) err
 					log.Printf("Event Recieved: Routing Event")
 
 					if debug {
-						log.Printf("Routing event %v", curEvent)
+						//log.Printf("Routing event %v", curEvent)
+						log.Printf("Event: %s", curEvent.MessageBody)
 					}
 
 					for k, v := range workingGuide {
 						if k.Match(curEvent.MessageHeader[:]) {
 							for i := range v {
-								log.Printf("Routing from %v to %v", curEvent.MessageHeader[:], v[i])
+								log.Printf("Routing from %s to %s", curEvent.MessageHeader[:], v[i])
 								r.outChan <- common.Message{MessageHeader: v[i], MessageBody: curEvent.MessageBody}
 							}
 							break //break out of our for loop
