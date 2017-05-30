@@ -14,6 +14,7 @@ import (
 
 type Subscriber interface {
 	Subscribe(address string, filter []string) error
+	GetSubscriptions() []string
 	Read() common.Message
 	Close()
 }
@@ -54,6 +55,13 @@ func (s *subscriber) Read() common.Message {
 
 }
 
+func (s *subscriber) GetSubscriptions() []string {
+	toReturn := []string{}
+	for _, v := range subscriptions {
+		toReturn = append(toReturn, v.Address)
+	}
+	return toReturn
+}
 func (s *subscriber) Subscribe(address string, filters []string) error {
 	compiledFilters := []*regexp.Regexp{}
 	for _, filter := range filters {
