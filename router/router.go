@@ -81,7 +81,7 @@ func (r *Router) reciever(messageTypes []string, wg sync.WaitGroup) error {
 				if ok {
 					alreadySubbed := false
 					log.Printf("Reciever: Starting connection with %s", addr.Address)
-					for _, t := range r.subscriptions {
+					for _, t := range sub.GetSubscriptions() {
 						log.Printf("Checking already existent subscription")
 						if t == addr.Address {
 							alreadySubbed = true
@@ -114,7 +114,6 @@ func (r *Router) reciever(messageTypes []string, wg sync.WaitGroup) error {
 					}
 
 					//note that we already have a subscription so we won't run one again
-					r.subscriptions = append(r.subscriptions, addr.Address)
 					log.Printf("Receiver: subscription to %s added", addr.Address)
 				} else {
 					log.Printf("Reciever: Error - subscription channel closed")

@@ -57,7 +57,7 @@ func (s *subscriber) Read() common.Message {
 
 func (s *subscriber) GetSubscriptions() []string {
 	toReturn := []string{}
-	for _, v := range subscriptions {
+	for _, v := range s.subscriptions {
 		toReturn = append(toReturn, v.Address)
 	}
 	return toReturn
