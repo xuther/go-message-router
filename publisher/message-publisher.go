@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"syscall"
 
 	"github.com/xuther/go-message-router/common"
 )
@@ -177,7 +178,7 @@ func (s *subscription) StartWriter() {
 				numWritten, err := s.Connection.Write(toWriteBytes)
 				if err != nil || numWritten != len(toWriteBytes) {
 					if err != nil {
-						if err == io.EOF {
+						if err == io.EOF || err == syscall.EPIPE {
 							log.Printf("Connection closed : %s", s.Connection.RemoteAddr().String())
 							s.pub.UnsubscribeChan <- s //end the connection to be removed and closed
 							return                     //End
