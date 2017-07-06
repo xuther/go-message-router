@@ -4,10 +4,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net"
-	"syscall"
 
 	"github.com/xuther/go-message-router/common"
 )
@@ -178,13 +176,11 @@ func (s *subscription) StartWriter() {
 				numWritten, err := s.Connection.Write(toWriteBytes)
 				if err != nil || numWritten != len(toWriteBytes) {
 					if err != nil {
-						if err == io.EOF || err == syscall.EPIPE {
-							log.Printf("Connection closed : %s", s.Connection.RemoteAddr().String())
-							s.pub.UnsubscribeChan <- s //end the connection to be removed and closed
-							return                     //End
-						} else {
-							log.Printf("ERROR: there was a problem with the connection to client: %s. Message: %s", s.Connection.RemoteAddr().String(), err.Error())
-						}
+						log.Printf("ERROR: there was a problem with the connection to client: %s. Message: %s", s.Connection.RemoteAddr().String(), err.Error())
+
+						log.Printf("Connection closed : %s", s.Connection.RemoteAddr().String())
+						s.pub.UnsubscribeChan <- s //end the connection to be removed and closed
+						return                     //End
 					} else {
 						log.Printf("There was a problem sending an event to %s: not all bytes were written", s.Connection.RemoteAddr().String())
 					}
