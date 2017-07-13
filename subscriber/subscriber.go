@@ -146,7 +146,8 @@ func (rs *readSubscription) StartListener() {
 
 			//pull out the rest of the message.
 			message := make([]byte, messageLen)
-			num, err = rs.Connection.Read(message)
+
+			num, err = io.ReadFull(rs.Connection, message)
 			if err != nil {
 				if err == io.EOF {
 					log.Printf("The connection for %s was closed", rs.Address)
