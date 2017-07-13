@@ -175,10 +175,8 @@ func TestSocketSubscription(t *testing.T) {
 	assert.Equal(t, temp2.MessageBody, temp1.MessageBody)
 }
 
-func Load(t *testing.T) {
-	if testing.Short() || !testing.Verbose() {
-		t.SkipNow()
-	}
+func TestLoad(t *testing.T) {
+	log.Printf("Testing load")
 	routingGuide := make(map[string][]string)
 
 	routingGuide["a"] = []string{"b"}
@@ -274,7 +272,7 @@ func Load(t *testing.T) {
 	That very month was September, and as fine as you could ask. A day or two later a rumour (probably started by the knowledgeable Sam) was spread about that there were going to be fireworks — fireworks, what is more, such as had not been seen in the Shire for nigh on a century, not indeed since the Old Took died.`
 
 	//End Setup
-	for i := 0; i < 5000; i++ {
+	for i := 0; i < 100000000; i++ {
 		for j := 0; j < 100; j++ {
 			pub.Write(common.Message{MessageHeader: headera, MessageBody: []byte(message)})
 		}
