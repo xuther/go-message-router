@@ -34,7 +34,7 @@ var subscriptionHeader = [24]byte{'X',
 	'R', 'E', 'Q',
 }
 
-const debug = true
+const debug = false
 
 var subscriptionHeaderString = "XSUBSCRIPTIONREQ"
 

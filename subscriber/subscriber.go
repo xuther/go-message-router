@@ -158,9 +158,9 @@ func (rs *readSubscription) StartListener() {
 			}
 			if num != int(messageLen) {
 				log.Printf("Not all of the message was recieved")
+				log.Printf("Message recieved from: %v", rs.Address)
 				log.Printf("Message length: %v/%v", num, messageLen)
-				log.Printf("First 1000 bytes: %s", message[:1000])
-
+				log.Printf("First 10 bytes: %s", message[:10])
 			}
 
 			//check the header to see if we care about the message
