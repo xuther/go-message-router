@@ -104,14 +104,16 @@ func (p *publisher) runBroadcaster() error {
 				log.Printf("Received a message in distribution channel. Distributing...")
 			}
 			for i := range p.subscriptions {
-				select {
-				case p.subscriptions[i].WriteQueue <- curMessage:
-				default:
-					d++
-					if d%100 == 0 {
-						log.Printf("%v discarded.", d)
+				if i >= 0 && i < len(p.subscriptions) {
+					select {
+					case p.subscriptions[i].WriteQueue <- curMessage:
+					default:
+						d++
+						if d%100 == 0 {
+							log.Printf("%v discarded.", d)
+						}
+						//log.Printf("Channel full for %v, discarding", p.subscriptions[i].Connection.RemoteAddr().String())
 					}
-					//log.Printf("Channel full for %v, discarding", p.subscriptions[i].Connection.RemoteAddr().String())
 				}
 			}
 		}
