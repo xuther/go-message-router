@@ -125,7 +125,7 @@ func (s *subscriber) startSubscriptionManager() {
 
 func (rs *readSubscription) StartListener() {
 	go func() {
-		log.Printf("Starting listener")
+		log.Printf("Starting listener v 0.1")
 		for {
 			headerAndLen := make([]byte, 28)
 
