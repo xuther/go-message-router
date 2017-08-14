@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/xuther/go-message-router/common"
 )
 
@@ -18,70 +19,10 @@ func TestPublish(t *testing.T) {
 
 	go publisher.Listen()
 
-	radder, err := net.ResolveTCPAddr("tcp", "localhost:60000")
+	var dialer *websocket.Dialer
+	conn, _, err := dialer.Dial("localhost:60000", nil)
 	if err != nil {
 		t.Error(err)
-	}
-
-	conn, err := net.DialTCP("tcp", nil, radder)
-	if err != nil {
-		t.Error(err)
-	}
-	time.Sleep(time.Second)
-
-	log.Printf("Connection1 Esablished")
-
-	header := [24]byte{}
-	copy(header[:], "testing")
-
-	publisher.Write(common.Message{header, []byte("test")})
-
-	toRead := make([]byte, 30)
-	_, err = conn.Read(toRead)
-	if err != nil {
-		t.Error(err)
-	}
-
-	if toRead[4] == 't' {
-		log.Printf("Incorrect Value")
-		t.Fail()
-	}
-
-	conn1, err := net.DialTCP("tcp", nil, radder)
-	if err != nil {
-		t.Error(err)
-	}
-	defer conn1.Close()
-	defer conn.Close()
-	time.Sleep(time.Second)
-
-	log.Printf("Connection1 Esablished")
-
-	header = [24]byte{}
-	copy(header[:], "Header2")
-
-	publisher.Write(common.Message{header, []byte("test")})
-
-	toRead = make([]byte, 30)
-	_, err = conn.Read(toRead)
-	if err != nil {
-		t.Error(err)
-	}
-
-	if toRead[4] == 'd' {
-		log.Printf("Incorrect Value")
-		t.Fail()
-	}
-
-	toRead = make([]byte, 30)
-	_, err = conn1.Read(toRead)
-	if err != nil {
-		t.Error(err)
-	}
-
-	if toRead[4] == 'd' {
-		log.Printf("Incorrect Value")
-		t.Fail()
 	}
 
 }
