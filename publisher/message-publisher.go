@@ -11,7 +11,8 @@ import (
 	"github.com/xuther/go-message-router/common"
 )
 
-const debug = false
+const debug = true
+const pingPeriod = 30 * time.Second
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1048576, //one MB
@@ -120,10 +121,15 @@ func (p *publisher) runBroadcaster() error {
 			curMessage := <-p.distributionChan
 			if debug {
 				log.Printf("Received a message in distribution channel. Distributing...")
+				log.Printf("There are %v subscriptions to send to", len(p.subscriptions))
 			}
 			for i := range p.subscriptions {
 				select {
 				case p.subscriptions[i].WriteQueue <- curMessage:
+
+					if debug {
+						log.Printf("Sending a message to: %v", p.subscriptions[i].Connection.RemoteAddr().String())
+					}
 				default:
 					d++
 					if d%100 == 0 {
@@ -175,6 +181,11 @@ func (p *publisher) runMembership() {
 //StartWriter runs a writer routine for the subscription, listening for messages to send
 func (s *subscription) StartWriter() {
 	go func() {
+		ticker := time.NewTicker(pingPeriod)
+		defer func() {
+			ticker.Stop()
+			s.Connection.Close()
+		}()
 		for {
 			select {
 			case toWrite := <-s.WriteQueue:
@@ -189,6 +200,13 @@ func (s *subscription) StartWriter() {
 					log.Printf("Connection closed : %s", s.Connection.RemoteAddr().String())
 					s.pub.UnsubscribeChan <- s //end the connection to be removed and closed
 					return                     //End
+				}
+			case <-ticker.C:
+				log.Printf("Sending Ping message")
+				if err := s.Connection.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
+					s.pub.UnsubscribeChan <- s //end the connection to be removed and closed
+					return
+
 				}
 			}
 		}

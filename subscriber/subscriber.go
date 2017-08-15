@@ -3,14 +3,16 @@ package subscriber
 import (
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"regexp"
+	"time"
 
 	"github.com/gorilla/websocket"
 
 	"github.com/xuther/go-message-router/common"
 )
+
+const debug = false
 
 type Subscriber interface {
 	Subscribe(address string, filter []string) error
@@ -21,6 +23,8 @@ type Subscriber interface {
 
 type subscriber struct {
 	aggregateQueueSize int
+	retry              bool
+	timeout            int
 	subscriptions      []*readSubscription
 	QueuedMessages     chan common.Message
 	subscribeChan      chan *readSubscription
@@ -29,6 +33,7 @@ type subscriber struct {
 
 type readSubscription struct {
 	FilterList []*regexp.Regexp
+	RawFilters []string
 	Address    string
 	Sub        *subscriber
 	Connection *websocket.Conn
@@ -41,6 +46,8 @@ func NewSubscriber(aggregateQueueSize int) (Subscriber, error) {
 		QueuedMessages:     make(chan common.Message, aggregateQueueSize),
 		subscribeChan:      make(chan *readSubscription, 10),
 		unsubscribeChan:    make(chan *readSubscription, 10),
+		retry:              true,
+		timeout:            500,
 	}
 	toReturn.startSubscriptionManager()
 
@@ -62,7 +69,20 @@ func (s *subscriber) GetSubscriptions() []string {
 	}
 	return toReturn
 }
+
 func (s *subscriber) Subscribe(address string, filters []string) error {
+	//we need to make sure it's not already in our subscriptions
+
+	for _, s := range s.subscriptions {
+		if debug {
+			log.Printf("checking subscription for %v. Comparing to %v", s.Address, address)
+		}
+		if s.Address == address {
+			log.Printf("Subscription already exists for %v", s.Address)
+			return nil
+		}
+	}
+
 	compiledFilters := []*regexp.Regexp{}
 	for _, filter := range filters {
 		val, err := regexp.Compile(filter)
@@ -86,12 +106,42 @@ func (s *subscriber) Subscribe(address string, filters []string) error {
 		Sub:        s,
 		Connection: conn,
 		FilterList: compiledFilters,
+		RawFilters: filters,
 	}
 
 	log.Printf("Subscription created, adding to manager")
-
 	s.subscribeChan <- &subscription
 	return nil
+}
+
+//do a decaying retry on the connection, with a timeout (in seconds) by set in the subscribe struct
+func (s *subscriber) retryConnection(sub *readSubscription) {
+	//start at once a second, then double it until we hit the timeout limit
+	timer := 1
+	for {
+		if timer > s.timeout {
+			log.Printf("Timeout past for reconnect to %v, stopping", sub.Address)
+			return
+		}
+		log.Printf("will attempt reconnect in %v seconds", timer)
+		time.Sleep(time.Duration(timer) * time.Second)
+		log.Printf("Attempting reconnect with %v", sub.Address)
+
+		//try the reconnect
+		err := s.Subscribe(sub.Address, sub.RawFilters)
+		if err != nil {
+			log.Printf("Could not reestablish connection: %v", err.Error())
+			temptimer := (float64(timer) * 1.5) + .5
+			log.Printf("temp timer: %v", temptimer)
+			timer = int(temptimer)
+
+			continue
+		}
+
+		//it was successful
+		log.Printf("Connection reestablished with %v", sub.Address)
+		return
+	}
 }
 
 func (s *subscriber) startSubscriptionManager() {
@@ -100,7 +150,7 @@ func (s *subscriber) startSubscriptionManager() {
 		for {
 			select {
 			case sub := <-s.subscribeChan:
-				log.Printf("Subscribed.")
+				log.Printf("Subscribed to %v.", sub.Address)
 				s.subscriptions = append(s.subscriptions, sub)
 				sub.StartListener()
 
@@ -109,6 +159,10 @@ func (s *subscriber) startSubscriptionManager() {
 					if i == unsub { //remove from our list of subscribers
 						s.subscriptions[k] = s.subscriptions[len(s.subscriptions)-1]
 						s.subscriptions = s.subscriptions[:len(s.subscriptions)-1]
+						if s.retry {
+							log.Printf("adding connection to Retry queue")
+							go s.retryConnection(i)
+						}
 					}
 				}
 			}
@@ -124,8 +178,8 @@ func (rs *readSubscription) StartListener() {
 			var message common.Message
 			err := rs.Connection.ReadJSON(&message)
 			if err != nil {
-				if err == io.EOF {
-					log.Printf("The connection for %s was closed", rs.Address)
+				if err, ok := err.(*websocket.CloseError); ok {
+					log.Printf("The connection for %s was closed. %v", rs.Address, err.Error())
 					rs.Sub.unsubscribeChan <- rs
 					return
 				}
