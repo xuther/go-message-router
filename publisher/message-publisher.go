@@ -135,7 +135,6 @@ func (p *publisher) runBroadcaster() error {
 					if d%100 == 0 {
 						log.Printf("%v discarded.", d)
 					}
-					//log.Printf("Channel full for %v, discarding", p.subscriptions[i].Connection.RemoteAddr().String())
 				}
 			}
 		}

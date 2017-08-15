@@ -24,7 +24,7 @@ type Subscriber interface {
 type subscriber struct {
 	aggregateQueueSize int
 	retry              bool
-	timeout            int
+	maxRetryInterval   int
 	subscriptions      []*readSubscription
 	QueuedMessages     chan common.Message
 	subscribeChan      chan *readSubscription
@@ -47,7 +47,7 @@ func NewSubscriber(aggregateQueueSize int) (Subscriber, error) {
 		subscribeChan:      make(chan *readSubscription, 10),
 		unsubscribeChan:    make(chan *readSubscription, 10),
 		retry:              true,
-		timeout:            500,
+		maxRetryInterval:   500,
 	}
 	toReturn.startSubscriptionManager()
 
@@ -119,10 +119,8 @@ func (s *subscriber) retryConnection(sub *readSubscription) {
 	//start at once a second, then double it until we hit the timeout limit
 	timer := 1
 	for {
-		if timer > s.timeout {
-			log.Printf("Timeout past for reconnect to %v, stopping", sub.Address)
-			return
-		}
+		log.Printf("Timeout past for reconnect to %v, stopping", sub.Address)
+		return
 		log.Printf("will attempt reconnect in %v seconds", timer)
 		time.Sleep(time.Duration(timer) * time.Second)
 		log.Printf("Attempting reconnect with %v", sub.Address)
@@ -131,11 +129,14 @@ func (s *subscriber) retryConnection(sub *readSubscription) {
 		err := s.Subscribe(sub.Address, sub.RawFilters)
 		if err != nil {
 			log.Printf("Could not reestablish connection: %v", err.Error())
-			temptimer := (float64(timer) * 1.5) + .5
-			log.Printf("temp timer: %v", temptimer)
-			timer = int(temptimer)
 
-			continue
+			if timer < s.maxRetryInterval {
+				temptimer := (float64(timer) * 1.5) + .5
+				log.Printf("temp timer: %v", temptimer)
+				timer = int(temptimer)
+
+				continue
+			}
 		}
 
 		//it was successful
@@ -182,10 +183,11 @@ func (rs *readSubscription) StartListener() {
 					log.Printf("The connection for %s was closed. %v", rs.Address, err.Error())
 					rs.Sub.unsubscribeChan <- rs
 					return
+				} else {
+					log.Printf("There was some problem with the connection to %v. Will attempt reconnect", rs.Address)
+					rs.Sub.unsubscribeChan <- rs
+					return
 				}
-
-				log.Printf("There was a problem reading from the connection to %s", rs.Address)
-				continue
 			}
 
 			//check the header to see if we care about the message
