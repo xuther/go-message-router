@@ -119,8 +119,6 @@ func (s *subscriber) retryConnection(sub *readSubscription) {
 	//start at once a second, then double it until we hit the timeout limit
 	timer := 1
 	for {
-		log.Printf("Timeout past for reconnect to %v, stopping", sub.Address)
-		return
 		log.Printf("will attempt reconnect in %v seconds", timer)
 		time.Sleep(time.Duration(timer) * time.Second)
 		log.Printf("Attempting reconnect with %v", sub.Address)
