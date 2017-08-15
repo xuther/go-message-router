@@ -46,8 +46,6 @@ func (r *Router) publisher(port string, wg sync.WaitGroup) error {
 		wg.Done()
 		return err
 	}
-	defer pub.Close()
-	go pub.Listen()
 
 	log.Printf("Publisher: Publisher ready.")
 	go func() {
@@ -61,6 +59,7 @@ func (r *Router) publisher(port string, wg sync.WaitGroup) error {
 			}
 		}
 	}()
+	go pub.Listen()
 	return nil
 }
 
