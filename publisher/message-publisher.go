@@ -1,9 +1,11 @@
 package publisher
 
 import (
+	"context"
 	"errors"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/xuther/go-message-router/common"
@@ -48,10 +50,10 @@ func NewPublisher(port string, writeQueueSize int, subscribeChanSize int) (Publi
 	}, nil
 }
 
-func (p *publisher) handleConnection(w http.ResponseWriter, r *http.Request) {
+func (p *publisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := upgrader.Upgrade(w, r, nil)
-	if err == nil {
+	if err != nil {
 		log.Printf("There was a problem accepting a connection from %v Error: %v", r.RemoteAddr, err.Error())
 		return
 	}
@@ -73,9 +75,14 @@ func (p *publisher) Listen() error {
 	//Start the broadcast routine
 	p.runBroadcaster()
 
-	srv := &http.Server{Addr: p.port}
+	//we can't use the default server mux
+	serverMux := http.NewServeMux()
+	serverMux.Handle("/subscribe", p)
 
-	http.HandlerFunc("/subscribe", p.handleConnection)
+	srv := &http.Server{
+		Addr:    ":" + p.port,
+		Handler: serverMux,
+	}
 
 	p.listener = srv
 	err := srv.ListenAndServe()
@@ -89,7 +96,11 @@ func (p *publisher) Listen() error {
 }
 
 func (p *publisher) Close() {
-	p.listener.Shutdown()
+
+	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+	if p.listener != nil {
+		p.listener.Shutdown(ctx)
+	}
 }
 
 func (p *publisher) Write(event common.Message) error {
@@ -171,7 +182,7 @@ func (s *subscription) StartWriter() {
 					log.Printf("Sending Message to %s", s.Connection.RemoteAddr().String())
 				}
 
-				err := s.Connection.WriteJSON(toWriteBytes)
+				err := s.Connection.WriteJSON(toWrite)
 				if err != nil {
 					log.Printf("ERROR: there was a problem with the connection to client: %s. Message: %s", s.Connection.RemoteAddr().String(), err.Error())
 

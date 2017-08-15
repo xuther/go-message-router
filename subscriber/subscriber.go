@@ -1,13 +1,13 @@
 package subscriber
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"regexp"
+
+	"github.com/gorilla/websocket"
 
 	"github.com/xuther/go-message-router/common"
 )
@@ -31,7 +31,7 @@ type readSubscription struct {
 	FilterList []*regexp.Regexp
 	Address    string
 	Sub        *subscriber
-	Connection *net.TCPConn
+	Connection *websocket.Conn
 }
 
 func NewSubscriber(aggregateQueueSize int) (Subscriber, error) {
@@ -73,16 +73,9 @@ func (s *subscriber) Subscribe(address string, filters []string) error {
 		compiledFilters = append(compiledFilters, val)
 	}
 
-	addr, err := net.ResolveTCPAddr("tcp", address)
+	var dialer *websocket.Dialer
+	conn, _, err := dialer.Dial(fmt.Sprintf("ws://%v/subscribe", address), nil)
 	if err != nil {
-		err = errors.New(fmt.Sprintf("Error resolving the TCP addr %s: %s", address, err.Error()))
-		log.Printf(err.Error())
-		return err
-	}
-
-	conn, err := net.DialTCP("tcp", nil, addr)
-	if err != nil {
-		log.Printf("Error establishing a connection with %s: %s", address, err.Error())
 		return err
 	}
 
@@ -127,9 +120,9 @@ func (rs *readSubscription) StartListener() {
 	go func() {
 		log.Printf("Starting listener")
 		for {
-			headerAndLen := make([]byte, 28)
 
-			num, err := rs.Connection.Read(headerAndLen)
+			var message common.Message
+			err := rs.Connection.ReadJSON(&message)
 			if err != nil {
 				if err == io.EOF {
 					log.Printf("The connection for %s was closed", rs.Address)
@@ -139,39 +132,14 @@ func (rs *readSubscription) StartListener() {
 
 				log.Printf("There was a problem reading from the connection to %s", rs.Address)
 				continue
-			}
-
-			//Get the length out of the message
-			messageLen := binary.LittleEndian.Uint32(headerAndLen[24:])
-
-			//pull out the rest of the message.
-			message := make([]byte, messageLen)
-
-			num, err = io.ReadFull(rs.Connection, message)
-			if err != nil {
-				if err == io.EOF {
-					log.Printf("The connection for %s was closed", rs.Address)
-					rs.Sub.unsubscribeChan <- rs
-					return
-				}
-				log.Printf("There was a problem reading from the connection to %s", rs.Address)
-				continue
-			}
-			if num != int(messageLen) {
-				log.Printf("Not all of the message was recieved")
-				log.Printf("Message recieved from: %v", rs.Address)
-				log.Printf("Message length: %v/%v", num, messageLen)
-				log.Printf("First 10 bytes: %s", message[:10])
 			}
 
 			//check the header to see if we care about the message
 			for _, filter := range rs.FilterList {
 
 				//only read in the message if it meets the criteria
-				if filter.Match(headerAndLen[:24]) {
-					header := [24]byte{}
-					copy(header[:], headerAndLen[:24])
-					rs.Sub.QueuedMessages <- common.Message{MessageHeader: header, MessageBody: message}
+				if filter.Match(message.MessageHeader[:]) {
+					rs.Sub.QueuedMessages <- message
 					break
 				}
 			}

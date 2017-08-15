@@ -2,9 +2,7 @@ package publisher
 
 import (
 	"log"
-	"net"
 	"testing"
-	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/xuther/go-message-router/common"
@@ -15,18 +13,38 @@ func TestPublish(t *testing.T) {
 	publisher, err := NewPublisher("60000", 100, 10)
 	if err != nil {
 		t.Error(err)
+		t.FailNow()
 	}
 
 	go publisher.Listen()
 
 	var dialer *websocket.Dialer
-	conn, _, err := dialer.Dial("localhost:60000", nil)
+	conn, _, err := dialer.Dial("ws://localhost:60000/subscribe", nil)
 	if err != nil {
 		t.Error(err)
+		t.FailNow()
 	}
 
+	publisher.Write(common.Message{MessageBody: []byte("this is a test")})
+
+	var toRead common.Message
+
+	log.Printf("%v", &conn)
+
+	err = conn.ReadJSON(&toRead)
+
+	if err != nil {
+		t.Error(err)
+		t.FailNow()
+	}
+
+	log.Printf("%s", toRead.MessageBody)
+	if string(toRead.MessageBody) != "this is a test" {
+		t.FailNow()
+	}
 }
 
+/*
 func BenchmarkPublisher(b *testing.B) {
 	time.Sleep(time.Second)
 
@@ -84,3 +102,5 @@ func BenchmarkPublisher(b *testing.B) {
 	log.Printf("Messages per second: %v", perSec)
 
 }
+
+*/
