@@ -94,16 +94,16 @@ func (s *subscriber) Subscribe(address string, filters []string) error {
 
 	var dialer *websocket.Dialer
 	conn, _, err := dialer.Dial(fmt.Sprintf("ws://%v/subscribe", address), nil)
+	if err != nil {
+		return err
+	}
+
 	subscription := readSubscription{
 		Address:    address,
 		Sub:        s,
 		Connection: conn,
 		FilterList: compiledFilters,
 		RawFilters: filters,
-	}
-	if err != nil {
-		s.retryConnection(&subscription)
-		return err
 	}
 
 	log.Printf("Connection sent")
