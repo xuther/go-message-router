@@ -11,7 +11,7 @@ import (
 	"github.com/xuther/go-message-router/common"
 )
 
-const debug = false
+const debug = true
 
 type Publisher interface {
 	Listen() error
