@@ -1,25 +1,30 @@
 package subscriber
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"log"
-	"net"
 	"regexp"
+	"time"
+
+	"github.com/gorilla/websocket"
 
 	"github.com/xuther/go-message-router/common"
 )
 
+const debug = false
+
 type Subscriber interface {
 	Subscribe(address string, filter []string) error
+	GetSubscriptions() []string
 	Read() common.Message
 	Close()
 }
 
 type subscriber struct {
 	aggregateQueueSize int
+	retry              bool
+	maxRetryInterval   int
 	subscriptions      []*readSubscription
 	QueuedMessages     chan common.Message
 	subscribeChan      chan *readSubscription
@@ -28,9 +33,10 @@ type subscriber struct {
 
 type readSubscription struct {
 	FilterList []*regexp.Regexp
+	RawFilters []string
 	Address    string
 	Sub        *subscriber
-	Connection *net.TCPConn
+	Connection *websocket.Conn
 }
 
 func NewSubscriber(aggregateQueueSize int) (Subscriber, error) {
@@ -40,6 +46,8 @@ func NewSubscriber(aggregateQueueSize int) (Subscriber, error) {
 		QueuedMessages:     make(chan common.Message, aggregateQueueSize),
 		subscribeChan:      make(chan *readSubscription, 10),
 		unsubscribeChan:    make(chan *readSubscription, 10),
+		retry:              true,
+		maxRetryInterval:   500,
 	}
 	toReturn.startSubscriptionManager()
 
@@ -51,10 +59,29 @@ func (s *subscriber) Close() {
 
 func (s *subscriber) Read() common.Message {
 	return <-s.QueuedMessages
+}
 
+func (s *subscriber) GetSubscriptions() []string {
+	toReturn := []string{}
+	for _, v := range s.subscriptions {
+		toReturn = append(toReturn, v.Address)
+	}
+	return toReturn
 }
 
 func (s *subscriber) Subscribe(address string, filters []string) error {
+
+	//we need to make sure it's not already in our subscriptions
+	for _, s := range s.subscriptions {
+		if debug {
+			log.Printf("checking subscription for %v. Comparing to %v", s.Address, address)
+		}
+		if s.Address == address {
+			log.Printf("Subscription already exists for %v", s.Address)
+			return nil
+		}
+	}
+
 	compiledFilters := []*regexp.Regexp{}
 	for _, filter := range filters {
 		val, err := regexp.Compile(filter)
@@ -65,32 +92,53 @@ func (s *subscriber) Subscribe(address string, filters []string) error {
 		compiledFilters = append(compiledFilters, val)
 	}
 
-	addr, err := net.ResolveTCPAddr("tcp", address)
+	var dialer *websocket.Dialer
+	conn, _, err := dialer.Dial(fmt.Sprintf("ws://%v/subscribe", address), nil)
 	if err != nil {
-		err = errors.New(fmt.Sprintf("Error resolving the TCP addr %s: %s", address, err.Error()))
-		log.Printf(err.Error())
 		return err
 	}
-
-	conn, err := net.DialTCP("tcp", nil, addr)
-	if err != nil {
-		log.Printf("Error establishing a connection with %s: %s", address, err.Error())
-		return err
-	}
-
-	log.Printf("Connection sent")
 
 	subscription := readSubscription{
 		Address:    address,
 		Sub:        s,
 		Connection: conn,
 		FilterList: compiledFilters,
+		RawFilters: filters,
 	}
 
+	log.Printf("Connection sent")
 	log.Printf("Subscription created, adding to manager")
-
 	s.subscribeChan <- &subscription
 	return nil
+}
+
+//do a decaying retry on the connection, with a timeout (in seconds) by set in the subscribe struct
+func (s *subscriber) retryConnection(sub *readSubscription) {
+	//start at once a second, then double it until we hit the timeout limit
+	timer := 1
+	for {
+		log.Printf("will attempt reconnect in %v seconds", timer)
+		time.Sleep(time.Duration(timer) * time.Second)
+		log.Printf("Attempting reconnect with %v", sub.Address)
+
+		//try the reconnect
+		err := s.Subscribe(sub.Address, sub.RawFilters)
+		if err != nil {
+			log.Printf("Could not reestablish connection: %v", err.Error())
+
+			if timer < s.maxRetryInterval {
+				temptimer := (float64(timer) * 1.5) + .5
+				log.Printf("temp timer: %v", temptimer)
+				timer = int(temptimer)
+
+				continue
+			}
+		}
+
+		//it was successful
+		log.Printf("Connection reestablished with %v", sub.Address)
+		return
+	}
 }
 
 func (s *subscriber) startSubscriptionManager() {
@@ -99,7 +147,7 @@ func (s *subscriber) startSubscriptionManager() {
 		for {
 			select {
 			case sub := <-s.subscribeChan:
-				log.Printf("Subscribed.")
+				log.Printf("Subscribed to %v.", sub.Address)
 				s.subscriptions = append(s.subscriptions, sub)
 				sub.StartListener()
 
@@ -108,6 +156,10 @@ func (s *subscriber) startSubscriptionManager() {
 					if i == unsub { //remove from our list of subscribers
 						s.subscriptions[k] = s.subscriptions[len(s.subscriptions)-1]
 						s.subscriptions = s.subscriptions[:len(s.subscriptions)-1]
+						if s.retry {
+							log.Printf("adding connection to Retry queue")
+							go s.retryConnection(i)
+						}
 					}
 				}
 			}
@@ -119,48 +171,27 @@ func (rs *readSubscription) StartListener() {
 	go func() {
 		log.Printf("Starting listener")
 		for {
-			headerAndLen := make([]byte, 28)
 
-			num, err := rs.Connection.Read(headerAndLen)
+			var message common.Message
+			err := rs.Connection.ReadJSON(&message)
 			if err != nil {
-				if err == io.EOF {
-					log.Printf("The connection for %s was closed", rs.Address)
+				if err, ok := err.(*websocket.CloseError); ok {
+					log.Printf("The connection for %s was closed. %v", rs.Address, err.Error())
+					rs.Sub.unsubscribeChan <- rs
+					return
+				} else {
+					log.Printf("There was some problem with the connection to %v. Will attempt reconnect", rs.Address)
 					rs.Sub.unsubscribeChan <- rs
 					return
 				}
-
-				log.Printf("There was a problem reading from the connection to %s", rs.Address)
-				continue
-			}
-
-			//Get the length out of the message
-			messageLen := binary.LittleEndian.Uint32(headerAndLen[24:])
-
-			//pull out the rest of the message.
-			message := make([]byte, messageLen)
-			num, err = rs.Connection.Read(message)
-			if err != nil {
-				if err == io.EOF {
-					log.Printf("The connection for %s was closed", rs.Address)
-					rs.Sub.unsubscribeChan <- rs
-					return
-				}
-				log.Printf("There was a problem reading from the connection to %s", rs.Address)
-				continue
-			}
-			if num != int(messageLen) {
-				log.Printf("Not all of the message was recieved")
-
 			}
 
 			//check the header to see if we care about the message
 			for _, filter := range rs.FilterList {
 
 				//only read in the message if it meets the criteria
-				if filter.Match(headerAndLen[:24]) {
-					header := [24]byte{}
-					copy(header[:], headerAndLen[:24])
-					rs.Sub.QueuedMessages <- common.Message{MessageHeader: header, MessageBody: message}
+				if filter.Match(message.MessageHeader[:]) {
+					rs.Sub.QueuedMessages <- message
 					break
 				}
 			}

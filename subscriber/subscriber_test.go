@@ -2,7 +2,6 @@ package subscriber
 
 import (
 	"fmt"
-	"log"
 	"testing"
 	"time"
 
@@ -15,29 +14,32 @@ func TestSubscribe(t *testing.T) {
 	publisher, err := publisher.NewPublisher("60000", 1000, 10)
 	if err != nil {
 		t.Error(err)
+		t.FailNow()
 	}
 	go publisher.Listen()
 
 	sub, err := NewSubscriber(10)
 	if err != nil {
 		t.Error(err)
+		t.FailNow()
 	}
 	sub.Subscribe("localhost:60000", []string{"a"})
 	header := [24]byte{}
 	copy(header[:], "a")
 
 	time.Sleep(1 * time.Second)
-	log.Printf("Writing")
+	t.Logf("Writing")
 
 	for i := 0; i < 100; i++ {
 		message := fmt.Sprintf("%v", i)
 		publisher.Write(common.Message{header, []byte(message)})
 	}
 
-	log.Printf("Reading")
+	t.Logf("Reading")
 
 	for i := 0; i < 100; i++ {
-		sub.Read()
+		received := sub.Read()
+		t.Logf("%s:%s", received.MessageHeader, received.MessageBody)
 	}
 }
 
@@ -67,7 +69,7 @@ func TestFilter(t *testing.T) {
 
 	time.Sleep(1 * time.Second)
 
-	log.Printf("Writing..")
+	t.Logf("Writing..")
 
 	for i := 0; i < 2; i++ {
 		message := fmt.Sprintf("%v", i)
@@ -75,7 +77,7 @@ func TestFilter(t *testing.T) {
 		publisher.Write(common.Message{headerb, []byte(message)})
 	}
 
-	log.Printf("Reading..")
+	t.Logf("Reading..")
 
 	test1 := sub.Read()
 	if test1.MessageBody[0] != '0' || test1.MessageHeader != headera {
@@ -139,7 +141,7 @@ func TestMultipleSubscriber(t *testing.T) {
 
 	time.Sleep(1 * time.Second)
 
-	log.Printf("Writing..")
+	t.Logf("Writing..")
 	go func() {
 		for i := 0; i < 2; i++ {
 			message := fmt.Sprintf("1-%v", i)
@@ -162,7 +164,7 @@ func TestMultipleSubscriber(t *testing.T) {
 
 	go func() {
 		time.Sleep(100 * time.Millisecond)
-		log.Printf("Starting subscriber 3")
+		t.Logf("Starting subscriber 3")
 		sub.Subscribe("localhost:60004", []string{"c"})
 
 		time.Sleep(1 * time.Second)
@@ -192,8 +194,10 @@ func TestMultipleSubscriber(t *testing.T) {
 		}
 	}
 
+	t.Logf("1a: %v", counts["1a"])
 	assert.Equal(t, counts["1a"], 2)
 	assert.Equal(t, counts["2a"], 1000)
+	t.Logf("2a: %v", counts["2a"])
 	assert.Equal(t, counts["2b"], 1000)
 	assert.Equal(t, counts["3"], 1000)
 }
