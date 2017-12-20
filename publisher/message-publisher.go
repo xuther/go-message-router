@@ -201,7 +201,9 @@ func (s *subscription) StartWriter() {
 					return                     //End
 				}
 			case <-ticker.C:
-				log.Printf("Sending Ping message")
+				if debug {
+					log.Printf("Sending Ping message")
+				}
 				if err := s.Connection.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
 					s.pub.UnsubscribeChan <- s //end the connection to be removed and closed
 					return
