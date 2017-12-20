@@ -5,13 +5,15 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
+	"github.com/fatih/color"
 	"github.com/gorilla/websocket"
 	"github.com/xuther/go-message-router/common"
 )
 
-const debug = true
+const debug = false
 const pingPeriod = 30 * time.Second
 
 var upgrader = websocket.Upgrader{
@@ -26,7 +28,7 @@ type Publisher interface {
 }
 
 type publisher struct {
-	subscriptions    []*subscription
+	subscriptions    sync.Map
 	port             string
 	listener         *http.Server
 	subscribeChan    chan *subscription
@@ -87,7 +89,6 @@ func (p *publisher) Listen() error {
 
 	p.listener = srv
 	err := srv.ListenAndServe()
-
 	if err != nil {
 		log.Printf("ERROR starting publisher listener: %v", err.Error())
 		return err
@@ -120,23 +121,27 @@ func (p *publisher) runBroadcaster() error {
 		for {
 			curMessage := <-p.distributionChan
 			if debug {
-				log.Printf("Received a message in distribution channel. Distributing...")
-				log.Printf("There are %v subscriptions to send to", len(p.subscriptions))
+				log.Printf("[publisher] received a message in distribution channel. Distributing...")
+				//log.Printf("[publisher] there are %v subscriptions to send to", len(p.subscriptions))
+				//dreaming of go 1.10....
 			}
-			for i := range p.subscriptions {
+			p.subscriptions.Range(func(key, value interface{}) bool {
 				select {
-				case p.subscriptions[i].WriteQueue <- curMessage:
+				case key.(*subscription).WriteQueue <- curMessage:
 
 					if debug {
-						log.Printf("Sending a message to: %v", p.subscriptions[i].Connection.RemoteAddr().String())
+						log.Printf("[publisher] sending a message to: %v", key.(*subscription).Connection.RemoteAddr().String())
 					}
+
 				default:
 					d++
 					if d%100 == 0 {
-						log.Printf("%v discarded.", d)
+						log.Printf("%s", color.HiYellowString("[publisher] %v discarded.", d))
 					}
 				}
-			}
+
+				return true
+			})
 		}
 	}()
 	return nil
@@ -150,24 +155,15 @@ func (p *publisher) runMembership() {
 
 			//Add a subscription
 			case subscription := <-p.subscribeChan:
-				log.Printf("Subscription receieved for %s", subscription.Connection.RemoteAddr().String())
-				p.subscriptions = append(p.subscriptions, subscription)
+				log.Printf("[publisher] subscription receieved for %s", subscription.Connection.RemoteAddr().String())
+				p.subscriptions.Store(subscription, true) //make use of value somehow
 				subscription.StartWriter()
 				break
 
 			//Remove a subscription
-			case subscription := <-p.UnsubscribeChan:
-				for i := range p.subscriptions {
-					if p.subscriptions[i] == subscription {
-						//This is the go sanctioned way of deleting an item from an array that contains pointers for garbage collection.
-						//Note that due to the format of slice headers the calculation fo len(slice) is constant time.
-						p.subscriptions[i].Connection.Close() //make sure the connection is closed, if it's already closed, don't worry about it
-						p.subscriptions[i] = p.subscriptions[len(p.subscriptions)-1]
-						p.subscriptions[len(p.subscriptions)-1] = nil
-						p.subscriptions = p.subscriptions[:len(p.subscriptions)-1]
-						break
-					}
-				}
+			case subscription := <-p.UnsubscribeChan: //returns a bunch of subscription pointers
+				subscription.Connection.Close()
+				p.subscriptions.Delete(subscription)
 				break
 
 			}

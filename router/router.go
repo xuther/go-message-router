@@ -4,10 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"regexp"
+	"reflect"
 	"sync"
 	"time"
 
+	"github.com/fatih/color"
 	"github.com/xuther/go-message-router/common"
 	"github.com/xuther/go-message-router/publisher"
 	"github.com/xuther/go-message-router/subscriber"
@@ -193,7 +194,7 @@ func (r *Router) Subscribe(address string, retryCount int, interval time.Duratio
 func (r *Router) router(wg sync.WaitGroup, routingGuide map[string][]string) error {
 	log.Printf("Router: starting router")
 
-	workingGuide := make(map[*regexp.Regexp][][24]byte)
+	workingGuide := make(map[[24]byte][][24]byte)
 
 	for k, v := range routingGuide {
 		if len(k) > 24 {
@@ -201,7 +202,12 @@ func (r *Router) router(wg sync.WaitGroup, routingGuide map[string][]string) err
 			wg.Done()
 			return err
 		}
-		sinks := [][24]byte{}
+
+		var from [24]byte
+		var to [][24]byte
+
+		copy(from[:], k)
+
 		for _, val := range v {
 			if len(val) > 24 {
 				err := errors.New(fmt.Sprintf("Header %v is too long, max length is 24", val))
@@ -210,18 +216,10 @@ func (r *Router) router(wg sync.WaitGroup, routingGuide map[string][]string) err
 			}
 			var cur [24]byte
 			copy(cur[:], val)
-			sinks = append(sinks, cur)
+			to = append(to, cur)
 		}
 
-		//compile the regex, and put all the strings into byte arrays
-		regex, err := regexp.Compile(k)
-		if err != nil {
-			err := errors.New(fmt.Sprintf("%v is not a valid regex string", k))
-			wg.Done()
-			return err
-		}
-
-		workingGuide[regex] = sinks
+		workingGuide[from] = to
 	}
 
 	go func() {
@@ -229,22 +227,24 @@ func (r *Router) router(wg sync.WaitGroup, routingGuide map[string][]string) err
 			select {
 			case curEvent, ok := <-r.inChan:
 				if ok {
-					log.Printf("Event Recieved: Routing Event")
+					log.Printf("Event Recieved. Header: %s", curEvent.MessageHeader)
 
 					if debug {
-						//log.Printf("Routing event %v", curEvent)
 						log.Printf("Event: %s", curEvent.MessageBody)
 					}
 
 					for k, v := range workingGuide {
-						if k.Match(curEvent.MessageHeader[:]) {
+						if reflect.DeepEqual(k, curEvent.MessageHeader) {
 							for i := range v {
-								log.Printf("Routing from %s to %s", curEvent.MessageHeader[:], v[i])
+								color.Set(color.FgBlue, color.Bold)
+								log.Printf("Routing from %s to %s", curEvent.MessageHeader, v[i])
+								color.Unset()
 								r.outChan <- common.Message{MessageHeader: v[i], MessageBody: curEvent.MessageBody}
 							}
-							break //break out of our for loop
+							break
 						}
 					}
+
 				} else {
 					log.Printf("Router: In Channel closed, exiting")
 					wg.Done()

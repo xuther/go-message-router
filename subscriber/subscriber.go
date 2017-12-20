@@ -59,7 +59,6 @@ func (s *subscriber) Close() {
 
 func (s *subscriber) Read() common.Message {
 	return <-s.QueuedMessages
-
 }
 
 func (s *subscriber) GetSubscriptions() []string {
@@ -71,8 +70,8 @@ func (s *subscriber) GetSubscriptions() []string {
 }
 
 func (s *subscriber) Subscribe(address string, filters []string) error {
-	//we need to make sure it's not already in our subscriptions
 
+	//we need to make sure it's not already in our subscriptions
 	for _, s := range s.subscriptions {
 		if debug {
 			log.Printf("checking subscription for %v. Comparing to %v", s.Address, address)
@@ -99,8 +98,6 @@ func (s *subscriber) Subscribe(address string, filters []string) error {
 		return err
 	}
 
-	log.Printf("Connection sent")
-
 	subscription := readSubscription{
 		Address:    address,
 		Sub:        s,
@@ -109,6 +106,7 @@ func (s *subscriber) Subscribe(address string, filters []string) error {
 		RawFilters: filters,
 	}
 
+	log.Printf("Connection sent")
 	log.Printf("Subscription created, adding to manager")
 	s.subscribeChan <- &subscription
 	return nil
