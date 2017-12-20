@@ -11,6 +11,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/gorilla/websocket"
 	"github.com/xuther/go-message-router/common"
+	"github.com/xuther/go-message-router/subscriber"
 )
 
 const debug = false
@@ -106,7 +107,7 @@ func (p *publisher) Close() {
 }
 
 func (p *publisher) Write(event common.Message) error {
-	if debug {
+	if subscriber.MessageDebug {
 		log.Printf("sending a message to the distribution channel")
 	}
 
@@ -120,7 +121,7 @@ func (p *publisher) runBroadcaster() error {
 		log.Printf("Starting distribution Channel")
 		for {
 			curMessage := <-p.distributionChan
-			if debug {
+			if subscriber.MessageDebug {
 				log.Printf("[publisher] received a message in distribution channel. Distributing...")
 				//log.Printf("[publisher] there are %v subscriptions to send to", len(p.subscriptions))
 				//dreaming of go 1.10....
@@ -129,7 +130,7 @@ func (p *publisher) runBroadcaster() error {
 				select {
 				case key.(*subscription).WriteQueue <- curMessage:
 
-					if debug {
+					if subscriber.MessageDebug {
 						log.Printf("[publisher] sending a message to: %v", key.(*subscription).Connection.RemoteAddr().String())
 					}
 
@@ -155,7 +156,10 @@ func (p *publisher) runMembership() {
 
 			//Add a subscription
 			case subscription := <-p.subscribeChan:
-				log.Printf("[publisher] subscription receieved for %s", subscription.Connection.RemoteAddr().String())
+				if subscriber.MembershipDebug {
+					log.Printf("[publisher] subscription receieved for %s", subscription.Connection.RemoteAddr().String())
+				}
+
 				p.subscriptions.Store(subscription, true) //make use of value somehow
 				subscription.StartWriter()
 				break
@@ -184,7 +188,7 @@ func (s *subscription) StartWriter() {
 		for {
 			select {
 			case toWrite := <-s.WriteQueue:
-				if debug {
+				if subscriber.MessageDebug {
 					log.Printf("Sending Message to %s", s.Connection.RemoteAddr().String())
 				}
 
@@ -197,7 +201,7 @@ func (s *subscription) StartWriter() {
 					return                     //End
 				}
 			case <-ticker.C:
-				if debug {
+				if subscriber.MessageDebug {
 					log.Printf("Sending Ping message")
 				}
 				if err := s.Connection.WriteMessage(websocket.PingMessage, []byte{}); err != nil {

@@ -227,9 +227,11 @@ func (r *Router) router(wg sync.WaitGroup, routingGuide map[string][]string) err
 			select {
 			case curEvent, ok := <-r.inChan:
 				if ok {
-					log.Printf("Event Recieved. Header: %s", curEvent.MessageHeader)
+					if subscriber.MessageDebug {
+						log.Printf("Event Recieved. Header: %s", curEvent.MessageHeader)
+					}
 
-					if debug {
+					if subscriber.MessageDebug {
 						log.Printf("Event: %s", curEvent.MessageBody)
 					}
 
@@ -237,7 +239,9 @@ func (r *Router) router(wg sync.WaitGroup, routingGuide map[string][]string) err
 						if reflect.DeepEqual(k, curEvent.MessageHeader) {
 							for i := range v {
 								color.Set(color.FgBlue, color.Bold)
-								log.Printf("Routing from %s to %s", curEvent.MessageHeader, v[i])
+								if subscriber.MessageDebug {
+									log.Printf("Routing from %s to %s", curEvent.MessageHeader, v[i])
+								}
 								color.Unset()
 								r.outChan <- common.Message{MessageHeader: v[i], MessageBody: curEvent.MessageBody}
 							}

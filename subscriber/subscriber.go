@@ -12,7 +12,8 @@ import (
 	"github.com/xuther/go-message-router/common"
 )
 
-const debug = false
+var MembershipDebug = false
+var MessageDebug = false
 
 type Subscriber interface {
 	Subscribe(address string, filter []string) error
@@ -73,11 +74,14 @@ func (s *subscriber) Subscribe(address string, filters []string) error {
 
 	//we need to make sure it's not already in our subscriptions
 	for _, s := range s.subscriptions {
-		if debug {
+		if MembershipDebug {
 			log.Printf("checking subscription for %v. Comparing to %v", s.Address, address)
 		}
 		if s.Address == address {
-			log.Printf("Subscription already exists for %v", s.Address)
+
+			if MembershipDebug {
+				log.Printf("Subscription already exists for %v", s.Address)
+			}
 			return nil
 		}
 	}
@@ -106,8 +110,10 @@ func (s *subscriber) Subscribe(address string, filters []string) error {
 		RawFilters: filters,
 	}
 
-	log.Printf("Connection sent")
-	log.Printf("Subscription created, adding to manager")
+	if MembershipDebug {
+		log.Printf("Connection sent")
+		log.Printf("Subscription created, adding to manager")
+	}
 	s.subscribeChan <- &subscription
 	return nil
 }
@@ -117,7 +123,9 @@ func (s *subscriber) retryConnection(sub *readSubscription) {
 	//start at once a second, then double it until we hit the timeout limit
 	timer := 1
 	for {
-		log.Printf("will attempt reconnect in %v seconds", timer)
+		if MembershipDebug {
+			log.Printf("will attempt reconnect in %v seconds", timer)
+		}
 		time.Sleep(time.Duration(timer) * time.Second)
 		log.Printf("Attempting reconnect with %v", sub.Address)
 
